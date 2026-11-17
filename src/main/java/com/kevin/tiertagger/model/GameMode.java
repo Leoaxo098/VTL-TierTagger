@@ -27,7 +27,7 @@ public record GameMode(String id, String title) {
             new GameMode("smp", "SMP"),
             new GameMode("axe", "Axe"),
             new GameMode("mace", "Mace"),
-            new GameMode("spear", "Spear"),
+            new GameMode("spear", "Spear Mace"),
             new GameMode("trident", "Trident")
     );
 
@@ -82,7 +82,7 @@ public record GameMode(String id, String title) {
             case "og_vanilla" -> new Pair<>('\uE810', TextColor.fromFormatting(Formatting.GOLD));
             case "speed" -> new Pair<>('\uE811', TextColor.fromRgb(0x43a9d1));
             case "trident" -> new Pair<>('\uE812', TextColor.fromRgb(0x579b8c));
-            case "spear" -> new Pair<>('•', TextColor.fromFormatting(Formatting.WHITE));
+            case "spear" -> new Pair<>('\uE709', TextColor.fromFormatting(Formatting.GRAY));
             default -> new Pair<>('•', TextColor.fromFormatting(Formatting.WHITE));
         };
     }
