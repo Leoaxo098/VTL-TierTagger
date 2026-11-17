@@ -55,7 +55,7 @@ public class MixinTitleScreen extends Screen {
             Minecraft.getInstance().setScreen(new ConfirmScreen(
                     b -> {
                         if (b) {
-                            String url = "https://modrinth.com/mod/tiertagger/version/" + latestVersion.getFriendlyString();
+                            String url = "https://modrinth.com/mod/vtl-tiertagger/version/" + latestVersion.getFriendlyString();
                             Util.getPlatform().openUri(url);
                         }
 

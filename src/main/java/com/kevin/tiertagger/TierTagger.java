@@ -7,6 +7,9 @@ import com.google.gson.JsonObject;
 import com.kevin.tiertagger.config.TierTaggerConfig;
 import com.kevin.tiertagger.model.GameMode;
 import com.kevin.tiertagger.model.PlayerInfo;
+import com.kevin.tiertagger.queue.QueueLinker;
+import com.kevin.tiertagger.queue.QueueWebSocket;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import lombok.Getter;
 import net.fabricmc.api.ModInitializer;
@@ -29,12 +32,17 @@ import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.net.Proxy;
+import java.net.ProxySelector;
+import java.net.SocketAddress;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -46,7 +54,7 @@ import static net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.lit
 
 public class TierTagger implements ModInitializer {
     public static final String MOD_ID = "tiertagger";
-    private static final String UPDATE_URL_FORMAT = "https://api.modrinth.com/v2/project/dpkYdLu5/version?game_versions=%s";
+    private static final String UPDATE_URL_FORMAT = "https://api.modrinth.com/v2/project/1qgfBAoj/version?game_versions=%s";
 
     public static final Gson GSON = new GsonBuilder().create();
 
@@ -54,8 +62,50 @@ public class TierTagger implements ModInitializer {
     private static final ConfigManager<TierTaggerConfig> manager = ConfigManager.createDefault(TierTaggerConfig.class, MOD_ID);
     @Getter
     private static final Logger logger = LoggerFactory.getLogger(TierTagger.class);
+    /**
+     * Shared HTTP client. Loopback addresses bypass the system proxy: dev/test servers
+     * (e.g. the mock queue server on 127.0.0.1) live there, and a corporate/VPN proxy in
+     * front of them answers with errors like HTTP 405 instead of forwarding.
+     */
     @Getter
-    private static final HttpClient client = HttpClient.newHttpClient();
+    private static final HttpClient client = HttpClient.newBuilder()
+            // HTTP/1.1 only: the default HTTP/2 client sends cleartext requests with
+            // `Upgrade: h2c` headers, which makes Node's shared HTTP+WS server route them
+            // to the websocket upgrader instead of the request handler (HTTP 405).
+            .version(HttpClient.Version.HTTP_1_1)
+            .proxy(new ProxySelector() {
+                private final ProxySelector system = ProxySelector.getDefault();
+
+                @Override
+                public List<Proxy> select(URI uri) {
+                    String host = uri == null ? null : uri.getHost();
+                    if (isLoopback(host)) {
+                        return List.of(Proxy.NO_PROXY);
+                    }
+                    if (system == null) return List.of(Proxy.NO_PROXY);
+                    try {
+                        return system.select(uri);
+                    } catch (IllegalArgumentException e) {
+                        return List.of(Proxy.NO_PROXY);
+                    }
+                }
+
+                @Override
+                public void connectFailed(URI uri, SocketAddress address, IOException failure) {
+                    if (system != null) system.connectFailed(uri, address, failure);
+                }
+            })
+            .build();
+
+    /** Loopback must never go through a proxy (dev/test servers live there). */
+    private static boolean isLoopback(String host) {
+        return host != null && (host.equalsIgnoreCase("localhost")
+                || host.equals("127.0.0.1") || host.equals("::1")
+                || host.endsWith(".localhost"));
+    }
+
+    @Getter
+    private static final QueueWebSocket queue = new QueueWebSocket();
 
     // === version checker stuff ===
     @Getter
@@ -66,8 +116,18 @@ public class TierTagger implements ModInitializer {
     public void onInitialize() {
         TierCache.init();
 
+        // Literal children win over the "player" argument for an exact token match, so a player
+        // literally named "link", "unlink" or "join" can no longer be looked up by name.
+        // Acceptable: those names are far rarer than the subcommands are useful.
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registry) -> dispatcher.register(
                 literal(MOD_ID)
+                        .then(literal("link")
+                                .then(argument("code", StringArgumentType.word())
+                                        .executes(TierTagger::linkQueueAccount)))
+                        .then(literal("unlink")
+                                .executes(TierTagger::unlinkQueueAccount))
+                        .then(literal("join")
+                                .executes(TierTagger::joinQueue))
                         .then(argument("player", PlayerArgumentType.player())
                                 .executes(TierTagger::displayTierInfo))));
 
@@ -82,7 +142,46 @@ public class TierTagger implements ModInitializer {
                     }
                 });
 
+        queue.start();
+
         checkForUpdates();
+    }
+
+    // === queue commands ===
+
+    private static int linkQueueAccount(CommandContext<FabricClientCommandSource> ctx) {
+        String code = StringArgumentType.getString(ctx, "code");
+
+        if (!code.matches("[A-Za-z0-9]{6}")) {
+            ctx.getSource().sendError(Component.translatable("tiertagger.queue.link.invalidFormat"));
+            return 0;
+        }
+
+        QueueLinker.link(code);
+        return 1;
+    }
+
+    private static int unlinkQueueAccount(CommandContext<FabricClientCommandSource> ctx) {
+        QueueLinker.unlink();
+        return 1;
+    }
+
+    private static int joinQueue(CommandContext<FabricClientCommandSource> ctx) {
+        String token = manager.getConfig().getQueueToken();
+        if (token == null) {
+            ctx.getSource().sendError(Component.translatable("tiertagger.queue.join.not_linked"));
+            return 0;
+        }
+
+        // Fail fast rather than queueing the request for later: the player asked to join a
+        // queue that is open now, and a late join is not what they asked for.
+        if (!queue.requestJoin()) {
+            ctx.getSource().sendError(Component.translatable("tiertagger.queue.join.offline"));
+            return 0;
+        }
+
+        ctx.getSource().sendFeedback(Component.translatable("tiertagger.queue.join.sending"));
+        return 1;
     }
 
     /**
@@ -110,7 +209,7 @@ public class TierTagger implements ModInitializer {
                     Component tierText = getRankingText(e.ranking(), false);
 
                     if (manager.getConfig().isShowIcons() && e.mode() != null && e.mode().icon().isPresent()) {
-                        return Component.literal(e.mode().icon().get().toString()).append(tierText);
+                        return Component.literal(e.mode().icon().get().toString() + " ").append(tierText);
                     } else {
                         return tierText.copy();
                     }
@@ -320,12 +419,15 @@ public class TierTagger implements ModInitializer {
                     logger.warn("Error checking for updates", t);
                     return null;
                 }).thenAccept(v -> {
-                    logger.info("Found latest version {}", v.getFriendlyString());
-                    latestVersion = v;
+                    if (v != null) {
+                        logger.info("Found latest version {}", v.getFriendlyString());
+                        latestVersion = v;
+                    }
                 });
     }
 
     public static boolean isObsolete() {
         return isObsolete.get();
     }
+
 }
