@@ -7,8 +7,6 @@ import com.google.gson.JsonObject;
 import com.kevin.tiertagger.config.TierTaggerConfig;
 import com.kevin.tiertagger.model.GameMode;
 import com.kevin.tiertagger.model.PlayerInfo;
-import com.kevin.tiertagger.queue.QueueLinker;
-import com.kevin.tiertagger.queue.QueueWebSocket;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import lombok.Getter;
@@ -64,14 +62,13 @@ public class TierTagger implements ModInitializer {
     private static final Logger logger = LoggerFactory.getLogger(TierTagger.class);
     /**
      * Shared HTTP client. Loopback addresses bypass the system proxy: dev/test servers
-     * (e.g. the mock queue server on 127.0.0.1) live there, and a corporate/VPN proxy in
-     * front of them answers with errors like HTTP 405 instead of forwarding.
+     * live there, and a corporate/VPN proxy in front of them answers with errors like
+     * HTTP 405 instead of forwarding.
      */
     @Getter
     private static final HttpClient client = HttpClient.newBuilder()
             // HTTP/1.1 only: the default HTTP/2 client sends cleartext requests with
-            // `Upgrade: h2c` headers, which makes Node's shared HTTP+WS server route them
-            // to the websocket upgrader instead of the request handler (HTTP 405).
+            // `Upgrade: h2c` headers, which some fronting proxies mishandle.
             .version(HttpClient.Version.HTTP_1_1)
             .proxy(new ProxySelector() {
                 private final ProxySelector system = ProxySelector.getDefault();
@@ -104,9 +101,6 @@ public class TierTagger implements ModInitializer {
                 || host.endsWith(".localhost"));
     }
 
-    @Getter
-    private static final QueueWebSocket queue = new QueueWebSocket();
-
     // === version checker stuff ===
     @Getter
     private static Version latestVersion = null;
@@ -116,18 +110,8 @@ public class TierTagger implements ModInitializer {
     public void onInitialize() {
         TierCache.init();
 
-        // Literal children win over the "player" argument for an exact token match, so a player
-        // literally named "link", "unlink" or "join" can no longer be looked up by name.
-        // Acceptable: those names are far rarer than the subcommands are useful.
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registry) -> dispatcher.register(
                 literal(MOD_ID)
-                        .then(literal("link")
-                                .then(argument("code", StringArgumentType.word())
-                                        .executes(TierTagger::linkQueueAccount)))
-                        .then(literal("unlink")
-                                .executes(TierTagger::unlinkQueueAccount))
-                        .then(literal("join")
-                                .executes(TierTagger::joinQueue))
                         .then(argument("player", PlayerArgumentType.player())
                                 .executes(TierTagger::displayTierInfo))));
 
@@ -142,46 +126,7 @@ public class TierTagger implements ModInitializer {
                     }
                 });
 
-        queue.start();
-
         checkForUpdates();
-    }
-
-    // === queue commands ===
-
-    private static int linkQueueAccount(CommandContext<FabricClientCommandSource> ctx) {
-        String code = StringArgumentType.getString(ctx, "code");
-
-        if (!code.matches("[A-Za-z0-9]{6}")) {
-            ctx.getSource().sendError(Component.translatable("tiertagger.queue.link.invalidFormat"));
-            return 0;
-        }
-
-        QueueLinker.link(code);
-        return 1;
-    }
-
-    private static int unlinkQueueAccount(CommandContext<FabricClientCommandSource> ctx) {
-        QueueLinker.unlink();
-        return 1;
-    }
-
-    private static int joinQueue(CommandContext<FabricClientCommandSource> ctx) {
-        String token = manager.getConfig().getQueueToken();
-        if (token == null) {
-            ctx.getSource().sendError(Component.translatable("tiertagger.queue.join.not_linked"));
-            return 0;
-        }
-
-        // Fail fast rather than queueing the request for later: the player asked to join a
-        // queue that is open now, and a late join is not what they asked for.
-        if (!queue.requestJoin()) {
-            ctx.getSource().sendError(Component.translatable("tiertagger.queue.join.offline"));
-            return 0;
-        }
-
-        ctx.getSource().sendFeedback(Component.translatable("tiertagger.queue.join.sending"));
-        return 1;
     }
 
     /**
