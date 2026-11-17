@@ -142,6 +142,13 @@
     },
     {
       "type": "bitmap",
+      "file": "tier-tagger:viettierlist/spear.png",
+      "ascent": 8,
+      "height": 8,
+      "chars": ["\uE709"]
+    },
+    {
+      "type": "bitmap",
       "file": "tier-tagger:tierlists/mctiers.png",
       "ascent": 10,
       "height": 12,
