@@ -45,7 +45,7 @@ import static net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.lit
 
 public class TierTagger implements ModInitializer {
     public static final String MOD_ID = "tiertagger";
-    private static final String UPDATE_URL_FORMAT = "https://api.modrinth.com/v2/project/dpkYdLu5/version?game_versions=%s";
+    private static final String UPDATE_URL_FORMAT = "https://api.modrinth.com/v2/project/1qgfBAoj/version?game_versions=%s";
 
     public static final Gson GSON = new GsonBuilder().create();
 
@@ -109,7 +109,7 @@ public class TierTagger implements ModInitializer {
                     Text tierText = getRankingText(e.ranking(), false);
 
                     if (manager.getConfig().isShowIcons() && e.mode() != null && e.mode().icon().isPresent()) {
-                        return Text.literal(e.mode().icon().get().toString()).append(tierText);
+                        return Text.literal(e.mode().icon().get().toString() + " ").append(tierText);
                     } else {
                         return tierText.copy();
                     }
@@ -317,8 +317,10 @@ public class TierTagger implements ModInitializer {
                     logger.warn("Error checking for updates", t);
                     return null;
                 }).thenAccept(v -> {
-                    logger.info("Found latest version {}", v.getFriendlyString());
-                    latestVersion = v;
+                    if (v != null) {
+                        logger.info("Found latest version {}", v.getFriendlyString());
+                        latestVersion = v;
+                    }
                 });
     }
 
