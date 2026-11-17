@@ -7,7 +7,6 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-import net.uku3lig.tiertagger.model.TierList;
 import net.uku3lig.ukulib.config.option.StringTranslatable;
 
 import java.io.Serializable;
@@ -34,7 +33,7 @@ public class TierTaggerConfig implements Serializable {
      * <p>the field was renamed to do a little trolling and force it setting to the default value in players' config</p>
      * <p>previous name(s): {@code baseUrl}</p>
      */
-    private String apiUrl = TierList.MCTIERS.getUrl();
+    private String apiUrl = "https://mctiers.com/api";
 
     public GameMode getGameMode() {
         Optional<GameMode> opt = TierCache.findMode(this.gameMode);

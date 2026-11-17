@@ -54,7 +54,7 @@ public class MixinTitleScreen extends Screen {
             Minecraft.getInstance().gui.setScreen(new ConfirmScreen(
                     b -> {
                         if (b) {
-                            URI uri = URI.create("https://modrinth.com/mod/tiertagger/version/" + latestVersion);
+                            URI uri = URI.create("https://modrinth.com/mod/vtl-tiertagger/version/" + latestVersion);
                             Blaze3D.openUri(uri);
                         }
 
