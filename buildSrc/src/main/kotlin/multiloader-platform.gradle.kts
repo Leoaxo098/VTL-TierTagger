@@ -25,7 +25,7 @@ tasks {
 
         inputs.property("version", version)
 
-        filesMatching(listOf("fabric.mod.json", "META-INF/neoforge.mods.toml")) {
+        filesMatching(listOf("fabric.mod.json")) {
             expand(mapOf("version" to inputs.properties["version"]))
         }
     }
@@ -48,7 +48,7 @@ modrinth {
     versionType = releaseType
     uploadFile.set(tasks.jar)
     gameVersions.add(BuildConfig.MINECRAFT_VERSION)
-    loaders.add(project.name) // either fabric or neoforge, which are valid values
+    loaders.add(project.name) // fabric (quilt added in fabric/build.gradle.kts)
     dependencies {
         required.project("ukulib")
     }
